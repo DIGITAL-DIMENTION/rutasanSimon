@@ -4,6 +4,9 @@ let currentUser = null;
 let currentOwner = null;
 let map = null;
 let driverMarkers = {};
+let locationChannel = null;
+let routeChannel = null;
+let alertChannel = null;
 
 // Elementos DOM
 const loginScreen = document.getElementById('loginScreen');
@@ -56,9 +59,9 @@ async function tryLogin() {
 // ----- CIERRE DE SESIÓN -----
 document.getElementById('logoutBtn').addEventListener('click', async () => {
   await supabase.auth.signOut();
-  if (window.locationSubscription) supabase.removeChannel(window.locationSubscription);
-  if (window.routeSubscription) supabase.removeChannel(window.routeSubscription);
-  if (window.alertSubscription) supabase.removeChannel(window.alertSubscription);
+  if (locationChannel) supabase.removeChannel(locationChannel);
+  if (routeChannel) supabase.removeChannel(routeChannel);
+  if (alertChannel) supabase.removeChannel(alertChannel);
   currentUser = null;
   currentOwner = null;
   mainScreen.classList.add('hidden');
@@ -80,32 +83,32 @@ function driverIcon(route) {
   const color = route === 'secundaria' ? '#1E9E5A' : (route === 'capilla' ? '#F5900C' : '#2C9E4A');
   return L.divIcon({
     className: '',
-    html: `<div style="width:32px;height:32px;border-radius:50%;background:${color};border:3px solid #fff;display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:0 2px 6px rgba(0,0,0,.4);">🚐</div>`,
-    iconSize: [32, 32],
-    iconAnchor: [16, 16],
+    html: `<div style="width:34px;height:34px;border-radius:50%;background:${color};border:3px solid #fff;display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 2px 8px rgba(0,0,0,.5);">🚐</div>`,
+    iconSize: [34, 34],
+    iconAnchor: [17, 17],
   });
 }
 
 // ----- ESCUCHAR DATOS EN TIEMPO REAL -----
 function initRealtimeListeners() {
-  // 1. Escuchar cambios en ubicaciones en vivo
-  window.locationSubscription = supabase
+  // 1. Ubicaciones en vivo
+  locationChannel = supabase
     .channel('locations-channel')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'live_locations' }, 
       () => { renderDriversAndMap(); }
     )
     .subscribe();
 
-  // 2. Escuchar cambios en eventos de ruta
-  window.routeSubscription = supabase
+  // 2. Eventos de ruta
+  routeChannel = supabase
     .channel('route-events-channel')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'route_events' }, 
       () => { renderRouteEvents(); }
     )
     .subscribe();
 
-  // 3. Escuchar cambios en alertas de pánico
-  window.alertSubscription = supabase
+  // 3. Alertas de pánico
+  alertChannel = supabase
     .channel('alerts-channel')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'panic_alerts' }, 
       () => { renderAlerts(); }
@@ -118,8 +121,11 @@ function initRealtimeListeners() {
   renderAlerts();
 }
 
-// ----- RENDERIZAR CONDUCTORES Y MAPA (YA CON FILTRO DE ADMIN/OWNER) -----
+// ----- RENDERIZAR CONDUCTORES Y MAPA (CON FILTRO ADMIN/OWNER) -----
 async function renderDriversAndMap() {
+  // Si no hay dueño cargado, salimos
+  if (!currentOwner) return;
+
   const isAdmin = currentOwner.role === 'admin';
   
   let query = supabase
@@ -136,7 +142,11 @@ async function renderDriversAndMap() {
   }
 
   const { data: drivers, error } = await query;
-  if (error) return;
+  
+  if (error) {
+    console.error("Error al cargar conductores:", error);
+    return;
+  }
 
   const list = document.getElementById('driversList');
   list.innerHTML = '';
@@ -147,6 +157,7 @@ async function renderDriversAndMap() {
 
   drivers.forEach(d => {
     const location = d.live_location?.[0];
+    // Consideramos "en vivo" si se actualizó hace menos de 2 minutos
     const fresh = location && location.updated_at && 
       (new Date() - new Date(location.updated_at) < 2 * 60 * 1000);
 
@@ -161,14 +172,14 @@ async function renderDriversAndMap() {
     const routeColor = d.route === 'capilla' ? '#F5900C' : 
                        d.route === 'secundaria' ? '#1E9E5A' : 'var(--ink-soft)';
 
-    // Texto de ubicación
+    // Texto de ubicación con HORA EXACTA
     let locText = 'Sin conexión';
     if (fresh) {
       const lat = location.lat.toFixed(5);
       const lng = location.lng.toFixed(5);
-      locText = `📍 ${lat}, ${lng} · ${timeAgo(new Date(location.updated_at))}`;
+      locText = `📍 ${lat}, ${lng} · ${new Date(location.updated_at).toLocaleTimeString('es-MX')}`;
     } else if (location && location.updated_at) {
-      locText = `Última vez: ${timeAgo(new Date(location.updated_at))}`;
+      locText = `Última vez: ${new Date(location.updated_at).toLocaleTimeString('es-MX')}`;
     }
 
     row.innerHTML = `
@@ -186,7 +197,7 @@ async function renderDriversAndMap() {
     `;
     list.appendChild(row);
 
-    // Actualizar marcadores en el mapa (SOLO si el conductor está activo y tiene ubicación)
+    // Actualizar marcadores en el mapa (EL CARRITO)
     if (fresh && location && location.lat && location.lng) {
       const latlng = [location.lat, location.lng];
       if (!driverMarkers[d.id]) {
@@ -205,7 +216,7 @@ async function renderDriversAndMap() {
   document.getElementById('driversOnlineCount').textContent = 
     onlineCount + ' en ruta · ' + capillaCount + ' Capilla · ' + secundariaCount + ' Sec.';
 
-  // Si hay conductores en el mapa y no se ha centrado, centrar el mapa
+  // Centrar el mapa la primera vez que vea conductores activos
   const activeMarkers = Object.values(driverMarkers);
   if (activeMarkers.length > 0 && !map._rssCentered) {
     const group = L.featureGroup(activeMarkers);
@@ -218,6 +229,8 @@ async function renderDriversAndMap() {
 
 // ----- RENDERIZAR AVISOS DE RUTA (CON FILTRO) -----
 async function renderRouteEvents() {
+  if (!currentOwner) return;
+
   const isAdmin = currentOwner.role === 'admin';
   let query = supabase
     .from('route_events')
@@ -243,7 +256,7 @@ async function renderRouteEvents() {
       <span class="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style="background:color-mix(in srgb, var(--agave) 14%, var(--paper-2)); color:var(--agave);"><i data-lucide="flag" class="w-4 h-4"></i></span>
       <div class="min-w-0">
         <p class="font-display font-semibold text-sm truncate">${ev.driver?.name || 'Conductor'} — ${ev.label || 'Aviso'}</p>
-        <p class="text-[11px] font-mono truncate" style="color:var(--ink-soft);">${ev.created_at ? timeAgo(new Date(ev.created_at)) : '—'}${ev.route ? ' · ' + (ev.route === 'capilla' ? 'Por Capilla' : 'Por Secundaria') : ''}</p>
+        <p class="text-[11px] font-mono truncate" style="color:var(--ink-soft);">${ev.created_at ? new Date(ev.created_at).toLocaleTimeString('es-MX') : '—'}${ev.route ? ' · ' + (ev.route === 'capilla' ? 'Por Capilla' : 'Por Secundaria') : ''}</p>
       </div>
     </div>
   `).join('');
@@ -252,6 +265,8 @@ async function renderRouteEvents() {
 
 // ----- RENDERIZAR ALERTAS DE PÁNICO (CON FILTRO) -----
 async function renderAlerts() {
+  if (!currentOwner) return;
+
   const isAdmin = currentOwner.role === 'admin';
   let query = supabase
     .from('panic_alerts')
@@ -315,16 +330,6 @@ async function renderAlerts() {
     });
   });
   if (window.lucide) lucide.createIcons();
-}
-
-// Utilidad para tiempo
-function timeAgo(date) {
-  const diff = Math.round((new Date() - date) / 60000);
-  if (diff < 1) return 'hace unos segundos';
-  if (diff < 60) return `hace ${diff} min`;
-  const hours = Math.floor(diff / 60);
-  if (hours < 24) return `hace ${hours}h`;
-  return date.toLocaleString('es-MX', { hour: 'numeric', minute: '2-digit' });
 }
 
 // ----- BOTÓN DE SILENCIAR ALARMA -----
