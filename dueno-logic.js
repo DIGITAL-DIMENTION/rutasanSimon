@@ -108,7 +108,9 @@ function initRealtimeListeners() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'live_locations' }, 
       () => { renderDriversAndMap(); }
     )
-    .subscribe();
+    .subscribe((status, err) => {
+      console.log('[Realtime] live_locations:', status, err || '');
+    });
 
   // 2. Eventos de ruta
   routeChannel = supabase
@@ -116,7 +118,9 @@ function initRealtimeListeners() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'route_events' }, 
       () => { renderRouteEvents(); }
     )
-    .subscribe();
+    .subscribe((status, err) => {
+      console.log('[Realtime] route_events:', status, err || '');
+    });
 
   // 3. Alertas de pánico
   alertChannel = supabase
@@ -124,7 +128,9 @@ function initRealtimeListeners() {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'panic_alerts' }, 
       () => { renderAlerts(); }
     )
-    .subscribe();
+    .subscribe((status, err) => {
+      console.log('[Realtime] panic_alerts:', status, err || '');
+    });
 
   // Carga inicial
   renderDriversAndMap();
@@ -248,7 +254,7 @@ async function renderRouteEvents() {
   }
 
   const { data: events, error } = await query;
-  if (error) return;
+  if (error) { console.error('Error cargando route_events:', error); return; }
 
   const list = document.getElementById('routeEventsList');
   if (!events || events.length === 0) {
@@ -284,7 +290,7 @@ async function renderAlerts() {
   }
 
   const { data: alerts, error } = await query;
-  if (error) return;
+  if (error) { console.error('Error cargando panic_alerts:', error); return; }
 
   const list = document.getElementById('alertsList');
   const empty = document.getElementById('alertsEmpty');
@@ -328,10 +334,19 @@ async function renderAlerts() {
 
   list.querySelectorAll('.resolve-btn').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      await supabase
+      btn.disabled = true;
+      const { error } = await supabase
         .from('panic_alerts')
         .update({ status: 'atendida' })
         .eq('id', btn.dataset.id);
+
+      if (error) {
+        console.error('Error al marcar alerta como atendida:', error);
+        btn.disabled = false;
+      } else {
+        // No esperamos al canal de Realtime: refrescamos de una vez
+        renderAlerts();
+      }
     });
   });
   if (window.lucide) lucide.createIcons();
