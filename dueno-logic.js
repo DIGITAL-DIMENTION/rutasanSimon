@@ -4,9 +4,6 @@ let currentUser = null;
 let currentOwner = null;
 let map = null;
 let driverMarkers = {};
-let routeEventsSubscription = null;
-let alertsSubscription = null;
-let locationsSubscription = null;
 
 // Elementos DOM
 const loginScreen = document.getElementById('loginScreen');
@@ -34,7 +31,6 @@ async function tryLogin() {
     return;
   }
 
-  // Obtener datos del dueño desde la tabla owners
   const { data: owner, error: ownerError } = await supabase
     .from('owners')
     .select('*')
@@ -60,9 +56,9 @@ async function tryLogin() {
 // ----- CIERRE DE SESIÓN -----
 document.getElementById('logoutBtn').addEventListener('click', async () => {
   await supabase.auth.signOut();
-  if (locationsSubscription) supabase.removeChannel(locationsSubscription);
-  if (routeEventsSubscription) supabase.removeChannel(routeEventsSubscription);
-  if (alertsSubscription) supabase.removeChannel(alertsSubscription);
+  if (window.locationSubscription) supabase.removeChannel(window.locationSubscription);
+  if (window.routeSubscription) supabase.removeChannel(window.routeSubscription);
+  if (window.alertSubscription) supabase.removeChannel(window.alertSubscription);
   currentUser = null;
   currentOwner = null;
   mainScreen.classList.add('hidden');
@@ -92,33 +88,27 @@ function driverIcon(route) {
 
 // ----- ESCUCHAR DATOS EN TIEMPO REAL -----
 function initRealtimeListeners() {
-  // 1. Ubicaciones en vivo
-  locationsSubscription = supabase
+  // 1. Escuchar cambios en ubicaciones en vivo
+  window.locationSubscription = supabase
     .channel('locations-channel')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'live_locations' }, 
-      async (payload) => {
-        await renderDriversAndMap();
-      }
+      () => { renderDriversAndMap(); }
     )
     .subscribe();
 
-  // 2. Eventos de ruta
-  routeEventsSubscription = supabase
+  // 2. Escuchar cambios en eventos de ruta
+  window.routeSubscription = supabase
     .channel('route-events-channel')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'route_events' }, 
-      async (payload) => {
-        await renderRouteEvents();
-      }
+      () => { renderRouteEvents(); }
     )
     .subscribe();
 
-  // 3. Alertas de pánico
-  alertsSubscription = supabase
+  // 3. Escuchar cambios en alertas de pánico
+  window.alertSubscription = supabase
     .channel('alerts-channel')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'panic_alerts' }, 
-      async (payload) => {
-        await renderAlerts();
-      }
+      () => { renderAlerts(); }
     )
     .subscribe();
 
@@ -128,9 +118,10 @@ function initRealtimeListeners() {
   renderAlerts();
 }
 
-// ----- RENDERIZAR CONDUCTORES Y MAPA -----
+// ----- RENDERIZAR CONDUCTORES Y MAPA (YA CON FILTRO DE ADMIN/OWNER) -----
 async function renderDriversAndMap() {
   const isAdmin = currentOwner.role === 'admin';
+  
   let query = supabase
     .from('drivers')
     .select(`
@@ -139,6 +130,7 @@ async function renderDriversAndMap() {
       live_location:live_locations ( lat, lng, heading, speed, updated_at )
     `);
 
+  // Si NO es admin, filtramos para que solo vea sus propias unidades
   if (!isAdmin) {
     query = query.eq('owner_id', currentOwner.id);
   }
@@ -169,12 +161,22 @@ async function renderDriversAndMap() {
     const routeColor = d.route === 'capilla' ? '#F5900C' : 
                        d.route === 'secundaria' ? '#1E9E5A' : 'var(--ink-soft)';
 
+    // Texto de ubicación
+    let locText = 'Sin conexión';
+    if (fresh) {
+      const lat = location.lat.toFixed(5);
+      const lng = location.lng.toFixed(5);
+      locText = `📍 ${lat}, ${lng} · ${timeAgo(new Date(location.updated_at))}`;
+    } else if (location && location.updated_at) {
+      locText = `Última vez: ${timeAgo(new Date(location.updated_at))}`;
+    }
+
     row.innerHTML = `
       <div class="min-w-0 flex items-center gap-2.5">
         <span class="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style="background:color-mix(in srgb, var(--talavera) 14%, var(--paper-2)); color:var(--talavera);"><i data-lucide="user" class="w-4 h-4"></i></span>
         <div class="min-w-0">
           <p class="font-display font-semibold text-sm truncate">${d.name} <span class="text-[10px] font-mono" style="color:var(--ink-soft);">(Unidad ${d.unit?.unit_number || '?'})</span></p>
-          <p class="text-[11px] font-mono truncate" style="color:var(--ink-soft);">${fresh ? 'Actualizado hace ' + timeAgo(new Date(location.updated_at)) : 'Sin conexión'}</p>
+          <p class="text-[11px] font-mono truncate" style="color:var(--ink-soft);">${locText}</p>
           <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full mt-1 inline-block" style="background:${routeColor}; color:#fff;">${routeLabel}</span>
         </div>
       </div>
@@ -184,15 +186,17 @@ async function renderDriversAndMap() {
     `;
     list.appendChild(row);
 
-    // Actualizar marcadores en el mapa
-    if (fresh && location.lat && location.lng) {
+    // Actualizar marcadores en el mapa (SOLO si el conductor está activo y tiene ubicación)
+    if (fresh && location && location.lat && location.lng) {
       const latlng = [location.lat, location.lng];
       if (!driverMarkers[d.id]) {
-        driverMarkers[d.id] = L.marker(latlng, { icon: driverIcon(d.route) }).addTo(map).bindPopup(d.name);
+        driverMarkers[d.id] = L.marker(latlng, { icon: driverIcon(d.route) }).addTo(map).bindPopup(`${d.name} · ${routeLabel}`);
       } else {
         driverMarkers[d.id].setLatLng(latlng);
+        driverMarkers[d.id].setPopupContent(`${d.name} · ${routeLabel}`);
       }
     } else if (driverMarkers[d.id]) {
+      // Si ya no está fresco, lo borramos del mapa
       map.removeLayer(driverMarkers[d.id]);
       delete driverMarkers[d.id];
     }
@@ -201,10 +205,18 @@ async function renderDriversAndMap() {
   document.getElementById('driversOnlineCount').textContent = 
     onlineCount + ' en ruta · ' + capillaCount + ' Capilla · ' + secundariaCount + ' Sec.';
 
+  // Si hay conductores en el mapa y no se ha centrado, centrar el mapa
+  const activeMarkers = Object.values(driverMarkers);
+  if (activeMarkers.length > 0 && !map._rssCentered) {
+    const group = L.featureGroup(activeMarkers);
+    map.fitBounds(group.getBounds().pad(0.2));
+    map._rssCentered = true;
+  }
+
   if (window.lucide) lucide.createIcons();
 }
 
-// ----- RENDERIZAR AVISOS DE RUTA -----
+// ----- RENDERIZAR AVISOS DE RUTA (CON FILTRO) -----
 async function renderRouteEvents() {
   const isAdmin = currentOwner.role === 'admin';
   let query = supabase
@@ -238,7 +250,7 @@ async function renderRouteEvents() {
   if (window.lucide) lucide.createIcons();
 }
 
-// ----- RENDERIZAR ALERTAS -----
+// ----- RENDERIZAR ALERTAS DE PÁNICO (CON FILTRO) -----
 async function renderAlerts() {
   const isAdmin = currentOwner.role === 'admin';
   let query = supabase
@@ -260,6 +272,7 @@ async function renderAlerts() {
   if (!alerts || alerts.length === 0) {
     empty.classList.remove('hidden');
     list.innerHTML = '';
+    document.getElementById('alarmBar').classList.remove('show');
     return;
   }
   empty.classList.add('hidden');
