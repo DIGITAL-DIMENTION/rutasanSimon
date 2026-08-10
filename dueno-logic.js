@@ -7,6 +7,7 @@ let driverMarkers = {};
 let locationChannel = null;
 let routeChannel = null;
 let alertChannel = null;
+let mapInitialized = false; // <--- ESTO ES NUEVO (Evita que el mapa se duplique)
 
 // Elementos DOM
 const loginScreen = document.getElementById('loginScreen');
@@ -51,7 +52,12 @@ async function tryLogin() {
   loginError.classList.add('hidden');
   loginScreen.classList.add('hidden');
   mainScreen.classList.remove('hidden');
-  initMap();
+  
+  // Inicializar mapa SOLO si no se ha creado antes
+  if (!mapInitialized) {
+    initMap();
+  }
+  
   initRealtimeListeners();
   if (window.lucide) lucide.createIcons();
 }
@@ -64,6 +70,7 @@ document.getElementById('logoutBtn').addEventListener('click', async () => {
   if (alertChannel) supabase.removeChannel(alertChannel);
   currentUser = null;
   currentOwner = null;
+  mapInitialized = false; // Reiniciamos el flag al cerrar sesión
   mainScreen.classList.add('hidden');
   loginScreen.classList.remove('hidden');
   emailInput.value = '';
@@ -72,11 +79,15 @@ document.getElementById('logoutBtn').addEventListener('click', async () => {
 
 // ----- MAPA (Leaflet) -----
 function initMap() {
+  if (mapInitialized) return; // Si ya existe, no hacer nada
+  
   map = L.map('map', { zoomControl: true, attributionControl: false }).setView([19.272, -98.455], 13);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
   L.control.attribution({ prefix: false })
     .addAttribution('© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>')
     .addTo(map);
+    
+  mapInitialized = true; // Marcamos que ya se creó
 }
 
 function driverIcon(route) {
@@ -123,7 +134,6 @@ function initRealtimeListeners() {
 
 // ----- RENDERIZAR CONDUCTORES Y MAPA (CON FILTRO ADMIN/OWNER) -----
 async function renderDriversAndMap() {
-  // Si no hay dueño cargado, salimos
   if (!currentOwner) return;
 
   const isAdmin = currentOwner.role === 'admin';
@@ -157,7 +167,6 @@ async function renderDriversAndMap() {
 
   drivers.forEach(d => {
     const location = d.live_location?.[0];
-    // Consideramos "en vivo" si se actualizó hace menos de 2 minutos
     const fresh = location && location.updated_at && 
       (new Date() - new Date(location.updated_at) < 2 * 60 * 1000);
 
@@ -172,7 +181,6 @@ async function renderDriversAndMap() {
     const routeColor = d.route === 'capilla' ? '#F5900C' : 
                        d.route === 'secundaria' ? '#1E9E5A' : 'var(--ink-soft)';
 
-    // Texto de ubicación con HORA EXACTA
     let locText = 'Sin conexión';
     if (fresh) {
       const lat = location.lat.toFixed(5);
@@ -197,7 +205,6 @@ async function renderDriversAndMap() {
     `;
     list.appendChild(row);
 
-    // Actualizar marcadores en el mapa (EL CARRITO)
     if (fresh && location && location.lat && location.lng) {
       const latlng = [location.lat, location.lng];
       if (!driverMarkers[d.id]) {
@@ -207,7 +214,6 @@ async function renderDriversAndMap() {
         driverMarkers[d.id].setPopupContent(`${d.name} · ${routeLabel}`);
       }
     } else if (driverMarkers[d.id]) {
-      // Si ya no está fresco, lo borramos del mapa
       map.removeLayer(driverMarkers[d.id]);
       delete driverMarkers[d.id];
     }
@@ -216,7 +222,6 @@ async function renderDriversAndMap() {
   document.getElementById('driversOnlineCount').textContent = 
     onlineCount + ' en ruta · ' + capillaCount + ' Capilla · ' + secundariaCount + ' Sec.';
 
-  // Centrar el mapa la primera vez que vea conductores activos
   const activeMarkers = Object.values(driverMarkers);
   if (activeMarkers.length > 0 && !map._rssCentered) {
     const group = L.featureGroup(activeMarkers);
@@ -227,7 +232,7 @@ async function renderDriversAndMap() {
   if (window.lucide) lucide.createIcons();
 }
 
-// ----- RENDERIZAR AVISOS DE RUTA (CON FILTRO) -----
+// ----- RENDERIZAR AVISOS DE RUTA -----
 async function renderRouteEvents() {
   if (!currentOwner) return;
 
@@ -263,7 +268,7 @@ async function renderRouteEvents() {
   if (window.lucide) lucide.createIcons();
 }
 
-// ----- RENDERIZAR ALERTAS DE PÁNICO (CON FILTRO) -----
+// ----- RENDERIZAR ALERTAS -----
 async function renderAlerts() {
   if (!currentOwner) return;
 
