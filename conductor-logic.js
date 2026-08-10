@@ -114,10 +114,12 @@ document.querySelectorAll('.ramal-btn').forEach((btn) => {
     if (navigator.vibrate) navigator.vibrate(15);
     localStorage.setItem('rss_driver_route_' + currentDriver.id, currentDriverRoute);
     
-    await supabase
+    const { error } = await supabase
       .from('drivers')
       .update({ route: currentDriverRoute })
       .eq('id', currentDriver.id);
+
+    if (error) console.error('Error actualizando ramal:', error);
   });
 });
 
@@ -158,6 +160,8 @@ checkpointBtn.addEventListener('click', async () => {
   if (!error) {
     checkpointSavedText.classList.remove('hidden');
     setTimeout(() => checkpointSavedText.classList.add('hidden'), 2500);
+  } else {
+    console.error('Error guardando checkpoint en route_events:', error);
   }
 
   checkpointIdx = (checkpointIdx + 1) % CHECKPOINTS.length;
@@ -166,13 +170,13 @@ checkpointBtn.addEventListener('click', async () => {
 });
 
 // ----- UBICACIÓN EN VIVO -----
-function onPos(pos) {
+async function onPos(pos) {
   const { latitude, longitude, heading, speed } = pos.coords;
   const now = Date.now();
   coordsText.textContent = `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
   updatedText.textContent = new Date(now).toLocaleTimeString('es-MX');
 
-  supabase
+  const { error } = await supabase
     .from('live_locations')
     .upsert({
       driver_id: currentDriver.id,
@@ -182,6 +186,11 @@ function onPos(pos) {
       speed: speed ?? null,
       updated_at: new Date().toISOString()
     }, { onConflict: 'driver_id' });
+
+  if (error) {
+    console.error('Error guardando ubicación en live_locations:', error);
+    statusText.textContent = 'No se pudo actualizar tu ubicación (revisa permisos).';
+  }
 }
 
 function onPosError(err) {
@@ -209,17 +218,21 @@ function startSharing() {
   });
 }
 
-function stopSharing() {
+async function stopSharing() {
   if (watchId !== null) navigator.geolocation.clearWatch(watchId);
   watchId = null;
   toggleBtn.classList.remove('on');
   toggleLabel.innerHTML = 'Encender<br>ubicación';
   statusText.textContent = 'Presiona el botón para que los pasajeros vean tu combi.';
 
-  supabase
+  const { error } = await supabase
     .from('live_locations')
     .update({ updated_at: null })
     .eq('driver_id', currentDriver.id);
+
+  if (error) {
+    console.error('Error apagando ubicación en live_locations:', error);
+  }
 }
 
 toggleBtn.addEventListener('click', () => {
@@ -271,6 +284,7 @@ async function sendPanicAlert(lat, lng) {
     document.getElementById('panicStepAsk').classList.add('hidden');
     document.getElementById('panicStepSent').classList.remove('hidden');
   } else {
+    console.error('Error enviando alerta de pánico:', error);
     document.getElementById('panicStepAsk').classList.add('hidden');
     document.getElementById('panicStepError').classList.remove('hidden');
   }
