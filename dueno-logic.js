@@ -176,6 +176,14 @@ async function renderDriversAndMap() {
     const fresh = location && location.updated_at && 
       (new Date() - new Date(location.updated_at) < 2 * 60 * 1000);
 
+    console.log('[DEBUG]', d.name, {
+      live_location_raw: d.live_location,
+      location,
+      updated_at: location?.updated_at,
+      diffMs: location?.updated_at ? (new Date() - new Date(location.updated_at)) : null,
+      fresh
+    });
+
     if (fresh) onlineCount++;
     if (d.route === 'capilla') capillaCount++;
     else if (d.route === 'secundaria') secundariaCount++;
