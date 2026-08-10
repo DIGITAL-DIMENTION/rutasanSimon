@@ -172,17 +172,9 @@ async function renderDriversAndMap() {
   let secundariaCount = 0;
 
   drivers.forEach(d => {
-    const location = d.live_location?.[0];
+    const location = Array.isArray(d.live_location) ? d.live_location[0] : d.live_location;
     const fresh = location && location.updated_at && 
       (new Date() - new Date(location.updated_at) < 2 * 60 * 1000);
-
-    console.log('[DEBUG]', d.name, {
-      live_location_raw: d.live_location,
-      location,
-      updated_at: location?.updated_at,
-      diffMs: location?.updated_at ? (new Date() - new Date(location.updated_at)) : null,
-      fresh
-    });
 
     if (fresh) onlineCount++;
     if (d.route === 'capilla') capillaCount++;
