@@ -150,12 +150,13 @@ checkpointBtn.addEventListener('click', async () => {
 
   const { error } = await supabase
     .from('route_events')
-    .insert({
+    .upsert({
       driver_id: currentDriver.id,
       event_key: cp.key,
       label: cp.label,
-      route: currentDriverRoute
-    });
+      route: currentDriverRoute,
+      created_at: new Date().toISOString()
+    }, { onConflict: 'driver_id' });
 
   if (!error) {
     checkpointSavedText.classList.remove('hidden');
