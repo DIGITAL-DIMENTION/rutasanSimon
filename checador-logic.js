@@ -367,6 +367,11 @@ on(sendSummaryBtn, 'click', sendDaySummary);
 async function sendDaySummary() {
   if (!currentChecador) return;
 
+  // Abrimos la ventana YA, de inmediato en el clic (si no, el navegador
+  // la bloquea como pop-up porque hay una espera de por medio para
+  // cargar los datos, y el clic "ya no cuenta" como el gesto que la abrió).
+  const summaryWindow = window.open('', '_blank');
+
   sendSummaryBtn.disabled = true;
   const originalHtml = sendSummaryBtn.innerHTML;
   sendSummaryBtn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4"></i> Armando resumen…';
@@ -388,11 +393,13 @@ async function sendDaySummary() {
 
   if (error) {
     console.error('Error armando el resumen del día:', error);
+    if (summaryWindow) summaryWindow.close();
     showToast('No se pudo armar el resumen. Intenta de nuevo.', 'error');
     return;
   }
 
   if (!events || events.length === 0) {
+    if (summaryWindow) summaryWindow.close();
     showToast('Todavía no tienes registros hoy para enviar.', 'warn');
     return;
   }
@@ -417,5 +424,10 @@ async function sendDaySummary() {
   text += `\nTotal: ${events.length} registros`;
 
   const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
-  window.open(url, '_blank');
+  if (summaryWindow) {
+    summaryWindow.location.href = url;
+  } else {
+    // El navegador bloqueó la ventana desde un inicio; lo intentamos una vez más.
+    window.open(url, '_blank');
+  }
 }
