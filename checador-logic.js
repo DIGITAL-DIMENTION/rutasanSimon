@@ -355,25 +355,31 @@ on(incidentNoPresentoBtn, 'click', () => {
   if (driverData) registerCheckpoint(driverData, 'no_se_presento');
 });
 
-// ----- RESUMEN DEL DÍA -> WHATSAPP -----
-// Número de WhatsApp del dueño, en formato: lada + número, sin espacios, sin +, sin 00.
-// Ej. si es de Puebla: '5212221234567' (52 = México, 1 = celular, luego lada + número).
-const DUENO_WHATSAPP_NUMBER = '522224613215';
-
-const STATUS_LINE = {
-  a_tiempo: { icon: '✅', label: 'A tiempo' },
-  retraso: { icon: '🟠', label: 'Llegó tarde' },
-  no_se_presento: { icon: '🔴', label: 'No se presentó' },
+// ----- RESUMEN DEL DÍA -> PDF DESCARGABLE -----
+const STATUS_LABEL = {
+  a_tiempo: 'A tiempo',
+  retraso: 'Llegó tarde',
+  no_se_presento: 'No se presentó',
+};
+const STATUS_COLOR = {
+  a_tiempo: [30, 158, 90],     // verde (agave)
+  retraso: [245, 144, 12],     // naranja (cempasúchil)
+  no_se_presento: [225, 72, 58], // rojo (alerta)
 };
 
-on(sendSummaryBtn, 'click', sendDaySummary);
+on(sendSummaryBtn, 'click', downloadDaySummaryPdf);
 
-async function sendDaySummary() {
+async function downloadDaySummaryPdf() {
   if (!currentChecador) return;
+
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    showToast('No se pudo cargar el generador de PDF. Revisa tu conexión e intenta de nuevo.', 'error');
+    return;
+  }
 
   sendSummaryBtn.disabled = true;
   const originalHtml = sendSummaryBtn.innerHTML;
-  sendSummaryBtn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4"></i> Armando resumen…';
+  sendSummaryBtn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4"></i> Armando PDF…';
   if (window.lucide) lucide.createIcons();
 
   const startOfDay = new Date();
@@ -397,34 +403,62 @@ async function sendDaySummary() {
   }
 
   if (!events || events.length === 0) {
-    showToast('Todavía no tienes registros hoy para enviar.', 'warn');
+    showToast('Todavía no tienes registros hoy para descargar.', 'warn');
     return;
   }
 
-  const todayLabel = new Date().toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const now = new Date();
+  const todayLabel = now.toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const todayFile = now.toISOString().slice(0, 10); // YYYY-MM-DD
 
-  let text = `📋 *Resumen del día — Ruta San Simón (R-18)*\n`;
-  text += `Checador: ${currentChecador.name}\n`;
-  text += `Fecha: ${todayLabel}\n\n`;
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
 
-  events.forEach((ev) => {
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(15);
+  doc.setTextColor(14, 128, 190); // azul talavera
+  doc.text('Resumen del día · Ruta San Simón (R-18)', 14, 18);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10);
+  doc.setTextColor(90, 82, 68);
+  doc.text(`Checador: ${currentChecador.name}`, 14, 26);
+  doc.text(`Fecha: ${todayLabel}`, 14, 32);
+
+  const rows = events.map((ev) => {
     const time = ev.created_at
       ? new Date(ev.created_at).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
       : '--:--';
     const unitNum = ev.unit?.unit_number != null ? ev.unit.unit_number : '?';
     const driverName = ev.driver?.name || 'Conductor';
-    const st = STATUS_LINE[ev.status] || { icon: '•', label: ev.status || '—' };
-    const lugar = ev.ubicacion ? ` · pasó por *${ev.ubicacion}*` : '';
-    text += `${st.icon} ${time} · Unidad ${unitNum} · ${driverName}${lugar} · ${st.label}\n`;
+    const lugar = ev.ubicacion || '—';
+    const statusText = STATUS_LABEL[ev.status] || ev.status || '—';
+    return [time, `Unidad ${unitNum}`, driverName, lugar, statusText];
   });
 
-  text += `\nTotal: ${events.length} registros`;
+  doc.autoTable({
+    head: [['Hora', 'Unidad', 'Conductor', 'Ubicación', 'Estatus']],
+    body: rows,
+    startY: 38,
+    styles: { font: 'helvetica', fontSize: 10, cellPadding: 3 },
+    headStyles: { fillColor: [14, 128, 190], textColor: 255, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: [244, 238, 220] },
+    didParseCell: (data) => {
+      if (data.section === 'body' && data.column.index === 4) {
+        const ev = events[data.row.index];
+        const color = STATUS_COLOR[ev.status];
+        if (color) {
+          data.cell.styles.textColor = color;
+          data.cell.styles.fontStyle = 'bold';
+        }
+      }
+    },
+  });
 
-  // Navegación directa (NO window.open): dentro de una PWA instalada no hay
-  // concepto de "pestaña nueva", así que abrir una ventana aparte se queda
-  // en el limbo y no pasa nada. location.href sí funciona siempre, y como
-  // wa.me/api.whatsapp.com es un enlace universal, el celular abre la app
-  // de WhatsApp directo en la conversación con el dueño.
-  const url = `https://wa.me/${DUENO_WHATSAPP_NUMBER}?text=${encodeURIComponent(text)}`;
-  window.location.href = url;
+  const finalY = doc.lastAutoTable.finalY || 38;
+  doc.setFontSize(10);
+  doc.setTextColor(90, 82, 68);
+  doc.text(`Total: ${events.length} registros`, 14, finalY + 8);
+
+  doc.save(`resumen-checador-${todayFile}.pdf`);
 }
