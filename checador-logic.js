@@ -1,9 +1,9 @@
 import { supabase } from './supabase-config.js';
 
 // ----- HELPER: enganchar eventos sin tronar si el elemento no existe -----
-function on(el, event, handler) {
+function on(el, event, handler, label) {
   if (!el) {
-    console.warn('[checador] Elemento no encontrado para el evento:', event);
+    console.warn('[checador] Elemento no encontrado para el evento:', event, label ? `(${label})` : '');
     return;
   }
   el.addEventListener(event, handler);
@@ -100,7 +100,7 @@ function goToPinScreen() {
 }
 
 on(backToPinBtn, 'click', goToPinScreen);
-on(switchChecadorBtn, 'click', goToPinScreen); // solo si existe en el HTML
+on(switchChecadorBtn, 'click', goToPinScreen, 'switchChecadorBtn - opcional, normal que no exista');
 
 // ----- UBICACIÓN (texto libre, con memoria en este dispositivo) -----
 function setupUbicacion() {
@@ -356,6 +356,10 @@ on(incidentNoPresentoBtn, 'click', () => {
 });
 
 // ----- RESUMEN DEL DÍA -> WHATSAPP -----
+// Número de WhatsApp del dueño, en formato: lada + número, sin espacios, sin +, sin 00.
+// Ej. si es de Puebla: '5212221234567' (52 = México, 1 = celular, luego lada + número).
+const DUENO_WHATSAPP_NUMBER = '522224613215';
+
 const STATUS_LINE = {
   a_tiempo: { icon: '✅', label: 'A tiempo' },
   retraso: { icon: '🟠', label: 'Llegó tarde' },
@@ -366,11 +370,6 @@ on(sendSummaryBtn, 'click', sendDaySummary);
 
 async function sendDaySummary() {
   if (!currentChecador) return;
-
-  // Abrimos la ventana YA, de inmediato en el clic (si no, el navegador
-  // la bloquea como pop-up porque hay una espera de por medio para
-  // cargar los datos, y el clic "ya no cuenta" como el gesto que la abrió).
-  const summaryWindow = window.open('', '_blank');
 
   sendSummaryBtn.disabled = true;
   const originalHtml = sendSummaryBtn.innerHTML;
@@ -393,13 +392,11 @@ async function sendDaySummary() {
 
   if (error) {
     console.error('Error armando el resumen del día:', error);
-    if (summaryWindow) summaryWindow.close();
     showToast('No se pudo armar el resumen. Intenta de nuevo.', 'error');
     return;
   }
 
   if (!events || events.length === 0) {
-    if (summaryWindow) summaryWindow.close();
     showToast('Todavía no tienes registros hoy para enviar.', 'warn');
     return;
   }
@@ -423,11 +420,11 @@ async function sendDaySummary() {
 
   text += `\nTotal: ${events.length} registros`;
 
-  const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
-  if (summaryWindow) {
-    summaryWindow.location.href = url;
-  } else {
-    // El navegador bloqueó la ventana desde un inicio; lo intentamos una vez más.
-    window.open(url, '_blank');
-  }
+  // Navegación directa (NO window.open): dentro de una PWA instalada no hay
+  // concepto de "pestaña nueva", así que abrir una ventana aparte se queda
+  // en el limbo y no pasa nada. location.href sí funciona siempre, y como
+  // wa.me/api.whatsapp.com es un enlace universal, el celular abre la app
+  // de WhatsApp directo en la conversación con el dueño.
+  const url = `https://wa.me/${DUENO_WHATSAPP_NUMBER}?text=${encodeURIComponent(text)}`;
+  window.location.href = url;
 }
