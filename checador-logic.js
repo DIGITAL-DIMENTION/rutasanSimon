@@ -79,7 +79,6 @@ function goToPinScreen() {
   pinInput.value = '';
 }
 
-document.getElementById('switchChecadorBtn').addEventListener('click', goToPinScreen);
 document.getElementById('backToPinBtn').addEventListener('click', goToPinScreen);
 
 // ----- UBICACIÓN (texto libre, con memoria en este dispositivo) -----
