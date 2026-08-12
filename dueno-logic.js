@@ -334,7 +334,7 @@ async function renderChecadorEvents() {
         <span class="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style="background:color-mix(in srgb, ${info.color} 16%, var(--paper-2)); color:${info.color};"><i data-lucide="${info.icon}" class="w-4 h-4"></i></span>
         <div class="min-w-0">
           <p class="font-display font-semibold text-sm truncate">${unitNum} — ${ev.driver?.name || 'Conductor'} — <span style="color:${info.color};">${info.label}</span></p>
-          <p class="text-[11px] font-mono truncate" style="color:var(--ink-soft);">${time}${routeTxt ? ' · ' + routeTxt : ''}${ev.ubicacion ? ' · ' + ev.ubicacion : ''}${ev.checador?.name ? ' · Checador: ' + ev.checador.name : ''}</p>
+          <p class="text-[11px] font-mono truncate" style="color:var(--ink-soft);">${time}${routeTxt ? ' · ' + routeTxt : ''}${ev.ubicacion ? ' · pasó por ' + ev.ubicacion : ''}${ev.checador?.name ? ' · Checador: ' + ev.checador.name : ''}</p>
         </div>
       </div>
     `;
