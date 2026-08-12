@@ -14,8 +14,6 @@ const APP_SHELL = [
   './firebase-config.js',
   './conductor.html',
   './dueno.html',
-  './checador.html',
-  './manifest-checador.json',
 ];
 
 self.addEventListener('install', (event) => {
