@@ -28,6 +28,11 @@ const ubicacionSaveBtn = document.getElementById('ubicacionSaveBtn');
 const ubicacionCancelBtn = document.getElementById('ubicacionCancelBtn');
 const ubicacionTitle = document.getElementById('ubicacionTitle');
 
+const unitDriversOverlay = document.getElementById('unitDriversOverlay');
+const unitDriversTitle = document.getElementById('unitDriversTitle');
+const unitDriversList = document.getElementById('unitDriversList');
+const unitDriversCancelBtn = document.getElementById('unitDriversCancelBtn');
+
 const incidentOverlay = document.getElementById('incidentOverlay');
 const incidentUnitLabel = document.getElementById('incidentUnitLabel');
 const incidentCancelBtn = document.getElementById('incidentCancelBtn');
@@ -44,8 +49,9 @@ let driversChannel = null;
 let toastTimer = null;
 let longPressTimer = null;
 let longPressFired = false;
-let pendingIncidentDriver = null;
+let pendingIncidentDriver = null; // objeto {driverId, unitId, driverName, route, ownerId, unitNumber}
 let allowUbicacionCancel = false;
+let unitsById = {}; // { unitId: { unit_number, drivers: [...] } }
 
 // ----- LOGIN CON PIN -----
 on(pinSubmitBtn, 'click', tryPin);
@@ -155,36 +161,56 @@ async function loadUnits() {
   renderUnitsGrid(drivers || []);
 }
 
+function routeColor(route) {
+  return route === 'capilla' ? 'var(--cempasuchil)' : (route === 'secundaria' ? 'var(--agave)' : 'var(--ink-soft)');
+}
+
+function routeLabel(route) {
+  return route === 'capilla' ? 'Por Capilla' : (route === 'secundaria' ? 'Por Secundaria' : 'Sin ramal');
+}
+
+// Agrupa a los conductores por unidad, porque una misma unidad puede
+// tener más de un conductor (turnos / días distintos).
 function renderUnitsGrid(drivers) {
   const withUnit = drivers.filter((d) => d.unit && d.unit.unit_number != null);
-  withUnit.sort((a, b) => Number(a.unit.unit_number) - Number(b.unit.unit_number));
 
-  if (withUnit.length === 0) {
+  unitsById = {};
+  withUnit.forEach((d) => {
+    const uid = d.unit.id;
+    if (!unitsById[uid]) unitsById[uid] = { unit_number: d.unit.unit_number, drivers: [] };
+    unitsById[uid].drivers.push({
+      driverId: d.id,
+      driverName: d.name || 'Conductor',
+      route: d.route || '',
+      ownerId: d.owner_id,
+      unitId: uid,
+      unitNumber: d.unit.unit_number,
+    });
+  });
+
+  const units = Object.entries(unitsById).map(([id, val]) => ({ id, ...val }));
+  units.sort((a, b) => Number(a.unit_number) - Number(b.unit_number));
+
+  if (units.length === 0) {
     unitsEmpty.classList.remove('hidden');
     unitsGrid.innerHTML = '';
     return;
   }
   unitsEmpty.classList.add('hidden');
 
-  unitsGrid.innerHTML = withUnit.map((d) => {
-    const routeColor = d.route === 'capilla' ? 'var(--cempasuchil)' : (d.route === 'secundaria' ? 'var(--agave)' : 'var(--ink-soft)');
+  unitsGrid.innerHTML = units.map((u) => {
+    const dotColor = u.drivers.length === 1 ? routeColor(u.drivers[0].route) : 'var(--ink-soft)';
     return `
-      <button class="unit-btn" data-driver-id="${d.id}" data-unit-id="${d.unit.id}"
-              data-driver-name="${escapeAttr(d.name || 'Conductor')}"
-              data-route="${d.route || ''}"
-              data-owner-id="${d.owner_id}">
-        <span class="unit-number">${d.unit.unit_number}</span>
-        <span class="unit-dot" style="background:${routeColor};"></span>
+      <button class="unit-btn" data-unit-id="${u.id}">
+        <span class="unit-number">${u.unit_number}</span>
+        <span class="unit-dot" style="background:${dotColor};"></span>
+        ${u.drivers.length > 1 ? `<span class="text-[10px] font-display font-semibold" style="color:var(--ink-soft);">${u.drivers.length} choferes</span>` : ''}
       </button>
     `;
   }).join('');
 
   attachUnitButtonHandlers();
   if (window.lucide) lucide.createIcons();
-}
-
-function escapeAttr(str) {
-  return String(str).replace(/"/g, '&quot;');
 }
 
 // ----- REALTIME: refrescar la cuadrícula si cambian conductores/ramales -----
@@ -195,37 +221,71 @@ function initRealtime() {
     .subscribe();
 }
 
-// ----- TAP (registro normal) vs LONG-PRESS (incidencia) -----
+// ----- TOCAR UNA UNIDAD -> ABRIR LISTA DE CONDUCTORES -----
 function attachUnitButtonHandlers() {
   document.querySelectorAll('.unit-btn').forEach((btn) => {
-    btn.addEventListener('pointerdown', () => {
+    btn.addEventListener('click', () => openUnitDriversOverlay(btn.dataset.unitId));
+  });
+}
+
+function openUnitDriversOverlay(unitId) {
+  const unit = unitsById[unitId];
+  if (!unit) return;
+
+  unitDriversTitle.innerHTML = `<i data-lucide="users"></i> Unidad ${unit.unit_number}`;
+  unitDriversList.innerHTML = unit.drivers.map((d, idx) => `
+    <button class="driver-row" data-driver-idx="${idx}">
+      <span class="driver-name">${escapeAttr(d.driverName)}</span>
+      ${d.route ? `<span class="route-badge" style="background:color-mix(in srgb, ${routeColor(d.route)} 18%, var(--paper-2)); color:${routeColor(d.route)};">${routeLabel(d.route)}</span>` : ''}
+    </button>
+  `).join('');
+
+  // Enganchar tap (registro normal) vs long-press (incidencia) en cada fila
+  unitDriversList.querySelectorAll('.driver-row').forEach((row) => {
+    const driverData = unit.drivers[Number(row.dataset.driverIdx)];
+    row.addEventListener('pointerdown', () => {
       longPressFired = false;
       longPressTimer = setTimeout(() => {
         longPressFired = true;
         if (navigator.vibrate) navigator.vibrate([15, 40, 15]);
-        openIncidentOverlay(btn);
+        closeUnitDriversOverlay();
+        openIncidentOverlay(driverData);
       }, 500);
     });
-
     const cancelPress = () => clearTimeout(longPressTimer);
-    btn.addEventListener('pointerup', () => {
+    row.addEventListener('pointerup', () => {
       clearTimeout(longPressTimer);
-      if (!longPressFired) registerCheckpoint(btn, 'a_tiempo');
+      if (!longPressFired) {
+        closeUnitDriversOverlay();
+        registerCheckpoint(driverData, 'a_tiempo');
+      }
     });
-    btn.addEventListener('pointerleave', cancelPress);
-    btn.addEventListener('pointercancel', cancelPress);
+    row.addEventListener('pointerleave', cancelPress);
+    row.addEventListener('pointercancel', cancelPress);
   });
+
+  unitDriversOverlay.classList.add('show');
+  if (window.lucide) lucide.createIcons();
 }
 
-async function registerCheckpoint(btn, status) {
+function closeUnitDriversOverlay() {
+  unitDriversOverlay.classList.remove('show');
+}
+
+on(unitDriversCancelBtn, 'click', closeUnitDriversOverlay);
+on(unitDriversOverlay, 'click', (e) => {
+  if (e.target.id === 'unitDriversOverlay') closeUnitDriversOverlay();
+});
+
+function escapeAttr(str) {
+  return String(str).replace(/"/g, '&quot;');
+}
+
+// ----- REGISTRAR CHECADA -----
+async function registerCheckpoint(driverData, status) {
   if (navigator.vibrate) navigator.vibrate(20);
 
-  const driverId = btn.dataset.driverId;
-  const unitId = btn.dataset.unitId;
-  const driverName = btn.dataset.driverName;
-  const route = btn.dataset.route;
-  const ownerId = btn.dataset.ownerId;
-  const unitNumber = btn.querySelector('.unit-number').textContent;
+  const { driverId, unitId, driverName, route, ownerId, unitNumber } = driverData;
 
   const { error } = await supabase
     .from('checador_events')
@@ -246,10 +306,10 @@ async function registerCheckpoint(btn, status) {
   }
 
   const time = new Date().toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
-  const routeLabel = route === 'capilla' ? 'Por Capilla' : (route === 'secundaria' ? 'Por Secundaria' : 'Sin ramal');
+  const rLabel = routeLabel(route);
 
   if (status === 'a_tiempo') {
-    showToast(`Unidad ${unitNumber} — ${driverName} — ${routeLabel} — ${time}`, 'ok');
+    showToast(`Unidad ${unitNumber} — ${driverName} — ${rLabel} — ${time}`, 'ok');
   } else if (status === 'retraso') {
     showToast(`Unidad ${unitNumber} — ${driverName} — Llegó tarde — ${time}`, 'warn');
   } else if (status === 'no_se_presento') {
@@ -267,11 +327,10 @@ function showToast(message, kind) {
   toastTimer = setTimeout(() => toast.classList.remove('show'), 2000);
 }
 
-// ----- INCIDENCIAS (long-press) -----
-function openIncidentOverlay(btn) {
-  pendingIncidentDriver = btn;
-  const unitNumber = btn.querySelector('.unit-number').textContent;
-  incidentUnitLabel.textContent = `Unidad ${unitNumber} — ${btn.dataset.driverName}`;
+// ----- INCIDENCIAS (long-press sobre el nombre del conductor) -----
+function openIncidentOverlay(driverData) {
+  pendingIncidentDriver = driverData;
+  incidentUnitLabel.textContent = `Unidad ${driverData.unitNumber} — ${driverData.driverName}`;
   incidentOverlay.classList.add('show');
 }
 
@@ -285,12 +344,12 @@ on(incidentOverlay, 'click', (e) => {
   if (e.target.id === 'incidentOverlay') closeIncidentOverlay();
 });
 on(incidentTardeBtn, 'click', () => {
-  const btn = pendingIncidentDriver;
+  const driverData = pendingIncidentDriver;
   closeIncidentOverlay();
-  if (btn) registerCheckpoint(btn, 'retraso');
+  if (driverData) registerCheckpoint(driverData, 'retraso');
 });
 on(incidentNoPresentoBtn, 'click', () => {
-  const btn = pendingIncidentDriver;
+  const driverData = pendingIncidentDriver;
   closeIncidentOverlay();
-  if (btn) registerCheckpoint(btn, 'no_se_presento');
+  if (driverData) registerCheckpoint(driverData, 'no_se_presento');
 });
