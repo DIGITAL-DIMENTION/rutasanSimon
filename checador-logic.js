@@ -369,12 +369,37 @@ const STATUS_COLOR = {
 
 on(sendSummaryBtn, 'click', downloadDaySummaryPdf);
 
+// Espera hasta `timeoutMs` a que window.jspdf esté disponible, revisando cada 250ms.
+// Sirve para cuando el CDN tarda en responder por mala señal, en vez de fallar
+// de inmediato en el primer intento.
+function waitForJsPdf(timeoutMs = 4000) {
+  return new Promise((resolve) => {
+    if (window.jspdf && window.jspdf.jsPDF) return resolve(true);
+    const startedAt = Date.now();
+    const interval = setInterval(() => {
+      if (window.jspdf && window.jspdf.jsPDF) {
+        clearInterval(interval);
+        resolve(true);
+      } else if (Date.now() - startedAt > timeoutMs) {
+        clearInterval(interval);
+        resolve(false);
+      }
+    }, 250);
+  });
+}
+
 async function downloadDaySummaryPdf() {
   if (!currentChecador) return;
 
   if (!window.jspdf || !window.jspdf.jsPDF) {
-    showToast('No se pudo cargar el generador de PDF. Revisa tu conexión e intenta de nuevo.', 'error');
-    return;
+    // No está listo todavía: puede que el CDN siga cargando por señal lenta.
+    // Le damos unos segundos antes de darnos por vencidos.
+    showToast('Preparando el generador de PDF…', 'warn');
+    const ready = await waitForJsPdf();
+    if (!ready) {
+      showToast('No se pudo cargar el generador de PDF. Revisa tu conexión e intenta de nuevo.', 'error');
+      return;
+    }
   }
 
   sendSummaryBtn.disabled = true;
