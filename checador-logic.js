@@ -42,6 +42,7 @@ const incidentNoPresentoBtn = document.getElementById('incidentNoPresentoBtn');
 const pinSubmitBtn = document.getElementById('pinSubmit');
 const backToPinBtn = document.getElementById('backToPinBtn');
 const switchChecadorBtn = document.getElementById('switchChecadorBtn'); // puede no existir, es opcional
+const sendSummaryBtn = document.getElementById('sendSummaryBtn');
 
 let currentChecador = null;
 let currentUbicacion = null;
@@ -353,3 +354,68 @@ on(incidentNoPresentoBtn, 'click', () => {
   closeIncidentOverlay();
   if (driverData) registerCheckpoint(driverData, 'no_se_presento');
 });
+
+// ----- RESUMEN DEL DÍA -> WHATSAPP -----
+const STATUS_LINE = {
+  a_tiempo: { icon: '✅', label: 'A tiempo' },
+  retraso: { icon: '🟠', label: 'Llegó tarde' },
+  no_se_presento: { icon: '🔴', label: 'No se presentó' },
+};
+
+on(sendSummaryBtn, 'click', sendDaySummary);
+
+async function sendDaySummary() {
+  if (!currentChecador) return;
+
+  sendSummaryBtn.disabled = true;
+  const originalHtml = sendSummaryBtn.innerHTML;
+  sendSummaryBtn.innerHTML = '<i data-lucide="loader-2" class="w-4 h-4"></i> Armando resumen…';
+  if (window.lucide) lucide.createIcons();
+
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+
+  const { data: events, error } = await supabase
+    .from('checador_events')
+    .select('*, driver:driver_id ( name ), unit:unit_id ( unit_number )')
+    .eq('checador_id', currentChecador.id)
+    .gte('created_at', startOfDay.toISOString())
+    .order('created_at', { ascending: true });
+
+  sendSummaryBtn.disabled = false;
+  sendSummaryBtn.innerHTML = originalHtml;
+  if (window.lucide) lucide.createIcons();
+
+  if (error) {
+    console.error('Error armando el resumen del día:', error);
+    showToast('No se pudo armar el resumen. Intenta de nuevo.', 'error');
+    return;
+  }
+
+  if (!events || events.length === 0) {
+    showToast('Todavía no tienes registros hoy para enviar.', 'warn');
+    return;
+  }
+
+  const todayLabel = new Date().toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+  let text = `📋 *Resumen del día — Ruta San Simón (R-18)*\n`;
+  text += `Checador: ${currentChecador.name}\n`;
+  text += `Fecha: ${todayLabel}\n\n`;
+
+  events.forEach((ev) => {
+    const time = ev.created_at
+      ? new Date(ev.created_at).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
+      : '--:--';
+    const unitNum = ev.unit?.unit_number != null ? ev.unit.unit_number : '?';
+    const driverName = ev.driver?.name || 'Conductor';
+    const st = STATUS_LINE[ev.status] || { icon: '•', label: ev.status || '—' };
+    const lugar = ev.ubicacion ? ` · pasó por *${ev.ubicacion}*` : '';
+    text += `${st.icon} ${time} · Unidad ${unitNum} · ${driverName}${lugar} · ${st.label}\n`;
+  });
+
+  text += `\nTotal: ${events.length} registros`;
+
+  const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+  window.open(url, '_blank');
+}
