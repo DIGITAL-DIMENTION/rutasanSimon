@@ -1,5 +1,14 @@
 import { supabase } from './supabase-config.js';
 
+// ----- HELPER: enganchar eventos sin tronar si el elemento no existe -----
+function on(el, event, handler) {
+  if (!el) {
+    console.warn('[checador] Elemento no encontrado para el evento:', event);
+    return;
+  }
+  el.addEventListener(event, handler);
+}
+
 // ----- ELEMENTOS DOM -----
 const pinScreen = document.getElementById('pinScreen');
 const mainScreen = document.getElementById('mainScreen');
@@ -25,6 +34,10 @@ const incidentCancelBtn = document.getElementById('incidentCancelBtn');
 const incidentTardeBtn = document.getElementById('incidentTardeBtn');
 const incidentNoPresentoBtn = document.getElementById('incidentNoPresentoBtn');
 
+const pinSubmitBtn = document.getElementById('pinSubmit');
+const backToPinBtn = document.getElementById('backToPinBtn');
+const switchChecadorBtn = document.getElementById('switchChecadorBtn'); // puede no existir, es opcional
+
 let currentChecador = null;
 let currentUbicacion = null;
 let driversChannel = null;
@@ -35,8 +48,8 @@ let pendingIncidentDriver = null;
 let allowUbicacionCancel = false;
 
 // ----- LOGIN CON PIN -----
-document.getElementById('pinSubmit').addEventListener('click', tryPin);
-pinInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') tryPin(); });
+on(pinSubmitBtn, 'click', tryPin);
+on(pinInput, 'keydown', (e) => { if (e.key === 'Enter') tryPin(); });
 
 async function tryPin() {
   const pin = pinInput.value.trim();
@@ -79,7 +92,8 @@ function goToPinScreen() {
   pinInput.value = '';
 }
 
-document.getElementById('backToPinBtn').addEventListener('click', goToPinScreen);
+on(backToPinBtn, 'click', goToPinScreen);
+on(switchChecadorBtn, 'click', goToPinScreen); // solo si existe en el HTML
 
 // ----- UBICACIÓN (texto libre, con memoria en este dispositivo) -----
 function setupUbicacion() {
@@ -106,12 +120,12 @@ function closeUbicacionOverlay() {
   ubicacionOverlay.classList.remove('show');
 }
 
-ubicacionChip.addEventListener('click', () => openUbicacionOverlay(false));
-ubicacionCancelBtn.addEventListener('click', () => {
+on(ubicacionChip, 'click', () => openUbicacionOverlay(false));
+on(ubicacionCancelBtn, 'click', () => {
   if (allowUbicacionCancel) closeUbicacionOverlay();
 });
-ubicacionInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') saveUbicacion(); });
-ubicacionSaveBtn.addEventListener('click', saveUbicacion);
+on(ubicacionInput, 'keydown', (e) => { if (e.key === 'Enter') saveUbicacion(); });
+on(ubicacionSaveBtn, 'click', saveUbicacion);
 
 function saveUbicacion() {
   const val = ubicacionInput.value.trim();
@@ -266,16 +280,16 @@ function closeIncidentOverlay() {
   pendingIncidentDriver = null;
 }
 
-incidentCancelBtn.addEventListener('click', closeIncidentOverlay);
-incidentOverlay.addEventListener('click', (e) => {
+on(incidentCancelBtn, 'click', closeIncidentOverlay);
+on(incidentOverlay, 'click', (e) => {
   if (e.target.id === 'incidentOverlay') closeIncidentOverlay();
 });
-incidentTardeBtn.addEventListener('click', () => {
+on(incidentTardeBtn, 'click', () => {
   const btn = pendingIncidentDriver;
   closeIncidentOverlay();
   if (btn) registerCheckpoint(btn, 'retraso');
 });
-incidentNoPresentoBtn.addEventListener('click', () => {
+on(incidentNoPresentoBtn, 'click', () => {
   const btn = pendingIncidentDriver;
   closeIncidentOverlay();
   if (btn) registerCheckpoint(btn, 'no_se_presento');
