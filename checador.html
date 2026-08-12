@@ -104,6 +104,17 @@
 
   #installBtn.show{ display:flex; }
 
+  /* Filas de conductor dentro de la hoja "elegir conductor" */
+  .driver-row{
+    width:100%; text-align:left; border-radius:1.25rem; border:1.5px solid var(--border);
+    background:var(--paper-2); padding:.9rem 1.05rem; display:flex; align-items:center; justify-content:space-between;
+    gap:.75rem; box-shadow:var(--shadow); touch-action: manipulation; user-select:none;
+    transition: all .18s cubic-bezier(.2,.8,.2,1);
+  }
+  .driver-row:active{ transform: scale(.97); background:var(--surface); }
+  .driver-row .driver-name{ font-family:'Sora', sans-serif; font-weight:700; font-size:15px; color:var(--ink); }
+  .driver-row .route-badge{ font-size:11px; font-weight:700; padding:.3rem .65rem; border-radius:999px; white-space:nowrap; }
+
   @media (prefers-reduced-motion: reduce){
     *{ transition: none !important; animation: none !important; }
   }
@@ -162,7 +173,7 @@
     </div>
     <div id="unitsGrid"></div>
     <p id="unitsEmpty" class="hidden text-sm text-center mt-4" style="color:var(--ink-soft);">Todavía no hay unidades dadas de alta.</p>
-    <p class="text-[11px] mt-4 text-center" style="color:var(--ink-soft);">Un toque registra la salida a tiempo. Mantén presionado para marcar un retraso o que no se presentó.</p>
+    <p class="text-[11px] mt-4 text-center" style="color:var(--ink-soft);">Toca la unidad y luego elige al conductor que le tocó hoy.</p>
   </div>
 </div>
 
@@ -184,6 +195,16 @@
       <button id="ubicacionCancelBtn" class="btn-lift flex-1 py-3 rounded-2xl font-display font-semibold text-sm placard">Cancelar</button>
       <button id="ubicacionSaveBtn" class="btn-lift flex-1 py-3 rounded-2xl font-display font-semibold text-sm" style="background:linear-gradient(155deg, var(--talavera) 0%, var(--talavera-dark) 100%); color:#fff;">Guardar</button>
     </div>
+  </div>
+</div>
+
+<!-- OVERLAY: ELEGIR CONDUCTOR DE LA UNIDAD -->
+<div id="unitDriversOverlay" class="sheet-overlay">
+  <div class="sheet">
+    <p id="unitDriversTitle" class="font-display font-semibold text-lg flex items-center gap-2" style="color:var(--talavera);"><i data-lucide="users"></i> Unidad —</p>
+    <p class="text-[13px] mt-1.5" style="color:var(--ink-soft);">Toca al conductor que traía la unidad hoy. Mantén presionado su nombre para marcar retraso o que no se presentó.</p>
+    <div id="unitDriversList" class="flex flex-col gap-2.5 mt-4"></div>
+    <button id="unitDriversCancelBtn" class="btn-lift w-full py-3 rounded-2xl font-display font-semibold text-sm placard mt-3">Cancelar</button>
   </div>
 </div>
 
